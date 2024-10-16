@@ -59,56 +59,93 @@ void init_vmem(){
     }
 }
 
-// LRU eviction function
-int evict_LRU() {
-    int oldest_time = INT_MAX;
-    int oldest_frame = -1;
-
-    for (int i = 0; i < RAM_SIZE; i++) {
-        if (ram[i] != NULL && ram[i]->last_accessed < oldest_time) {
-            oldest_frame = i;
-            oldest_time = ram[i]->last_accessed;
-        }
-    }
-
-    return oldest_frame;  // Return the frame number of the least recently used page
-}
-
 // Load page into RAM
 void load_page_to_ram(int process_id, int page_num, int frame) {
     ram[frame] = vmem[(process_id * PAGE_COUNT * 2) + (page_num * 2)];  // Copy from virtual memory to RAM
     ram[frame]->last_accessed = timestep;  // Update last accessed time
     page_tables[process_id][page_num] = frame;  // Update page table
+    timestep++;
 }
 
-// Request page and bring it to RAM
-void page_request(int process_id, int page_num) {
-    int frame_num = page_tables[process_id][page_num];
 
+int local_LRU(int process_id) {
+    int oldest_time = INT_MAX;
+    int oldest_frame = -1;
+
+    for (int page_num = 0; page_num < PAGE_COUNT; page_num++) {
+        int frame_num = page_tables[process_id][page_num];
+
+        if (frame_num != ON_DISC && ram[frame_num] != NULL && ram[frame_num]->last_accessed < oldest_time) {
+            oldest_time = ram[frame_num]->last_accessed;
+            oldest_frame = frame_num;
+        }
+    }
+
+    return oldest_frame;
+}
+
+
+int global_LRU() {
+    int oldest_time = INT_MAX;
+    int oldest_frame = -1;
+
+    for (int i = 0; i < RAM_SIZE; i++) {
+        if (ram[i] != NULL && ram[i]->last_accessed < oldest_time) {
+            oldest_time = ram[i]->last_accessed;
+            oldest_frame = i;
+        }
+    }
+
+    return oldest_frame;
+}
+
+int next_process_page(int process_id){
+    for (int page_num = 0; page_num < PAGE_COUNT; page_num++){
+        if (page_tables[process_id][page_num] == ON_DISC){
+            return page_num;
+        }
+    }
+    return -1;
+}
+
+void page_request(int process_id) {
+    int page_num = next_process_page(process_id);
+    int frame_num = page_tables[process_id][page_num];  // Get the current frame number from the page table
+
+    // If the page is already in RAM, update the last accessed time
     if (frame_num != ON_DISC) {
-        // Page is already in RAM
-        ram[frame_num]->last_accessed = timestep;  // Update last accessed time
-        timestep++;  // Increment global time
+        ram[frame_num]->last_accessed = timestep++;  // Update last accessed time and increment timestep
         return;
-    } else {
-        // Page is not in RAM, find space or evict a page
-        int empty_frame = -1;
-        for (int i = 0; i < RAM_SIZE; i++) {
-            if (ram[i] == NULL) {
-                empty_frame = i;
-                break;
-            }
-        }
+    }
 
-        if (empty_frame != -1) {
-            // We found an empty frame, load the page there
-            load_page_to_ram(process_id, page_num, empty_frame);
-        } else {
-            // No empty frame, evict a page using LRU
-            int evicted_frame = evict_LRU();
-            load_page_to_ram(process_id, page_num, evicted_frame);
+    // Check for an empty frame in RAM
+    int empty_frame = -1;
+    for (int i = 0; i < RAM_SIZE; i++) {
+        if (ram[i] == NULL) {
+            empty_frame = i;
+            break;
         }
-        timestep++;  // Increment global time after loading a new page
+    }
+
+    if (empty_frame != -1) {
+        // Empty frame found, load the page into the empty frame
+        load_page_to_ram(process_id, page_num, empty_frame);
+    } else {
+        // No empty frames available, proceed to LRU eviction
+
+        // Local LRU policy: Find the least recently used page for this process in RAM
+        int local_lru_frame = local_LRU(process_id);
+
+        if (local_lru_frame != -1) {
+            // A local LRU page was found, evict that page
+            load_page_to_ram(process_id, page_num, local_lru_frame);
+        } else {
+            // Global LRU policy: Find the least recently used page in all of RAM
+            int global_lru_frame = global_LRU();
+
+            // Evict the globally least recently used page
+            load_page_to_ram(process_id, page_num, global_lru_frame);
+        }
     }
 }
 
@@ -121,9 +158,10 @@ void simulate(char *input_file) {
         return;
     }
 
-    int process_id, page_num;
-    while (fscanf(infile, "%d %d", &process_id, &page_num) != EOF) {
-        page_request(process_id, page_num);
+    int process_id;
+    while (fscanf(infile, "%d ", &process_id) != EOF) {
+        printf("%i\n",timestep);
+        page_request(process_id);
     }
 
     fclose(infile);
