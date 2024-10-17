@@ -59,11 +59,17 @@ void init_vmem(){
     }
 }
 
+int ram2frame(int ram_index){
+    return ram_index;
+}
+
 // Load page into RAM
 void load_page_to_ram(int process_id, int page_num, int frame) {
     ram[frame] = vmem[(process_id * PAGE_COUNT * 2) + (page_num * 2)];  // Copy from virtual memory to RAM
     ram[frame]->last_accessed = timestep;  // Update last accessed time
-    page_tables[process_id][page_num] = frame;  // Update page table
+    ram[frame+1] = vmem[(process_id * PAGE_COUNT * 2) + (page_num * 2)];  // Copy from virtual memory to RAM
+    ram[frame+1]->last_accessed = timestep;  // Update last accessed time
+    page_tables[process_id][page_num] = frame/2;  // Update page table
     timestep++;
 }
 
@@ -80,7 +86,9 @@ int local_LRU(int process_id) {
             oldest_frame = frame_num;
         }
     }
-
+    if (oldest_frame != -1){
+        page_tables[ram[oldest_frame]->process_id][ram[oldest_frame]->page_num] = ON_DISC;
+    }  
     return oldest_frame;
 }
 
@@ -92,10 +100,10 @@ int global_LRU() {
     for (int i = 0; i < RAM_SIZE; i++) {
         if (ram[i] != NULL && ram[i]->last_accessed < oldest_time) {
             oldest_time = ram[i]->last_accessed;
-            oldest_frame = i;
+            oldest_frame = i/2;
         }
     }
-
+    page_tables[ram[oldest_frame]->process_id][ram[oldest_frame]->page_num] = ON_DISC;  
     return oldest_frame;
 }
 
@@ -122,7 +130,7 @@ void page_request(int process_id) {
     int empty_frame = -1;
     for (int i = 0; i < RAM_SIZE; i++) {
         if (ram[i] == NULL) {
-            empty_frame = i;
+            empty_frame = ram2frame(i);
             break;
         }
     }
